@@ -28,15 +28,9 @@ class Game(ABC):
   def next_state(self, action, player) -> Self:
     """ Return a new Game object with the given action played """
 
-  def get_available_actions(self) -> list:
-    """ Return a list of legal moves """
-
   def get_winner(self) -> Optional[int]:
     """ Return the winner of the game """
   
-  def get_reward(self, player) -> int:
-    return {
-      player: 1,
-      -player: -1,
-      0: 0
-    }[player]
+  @abstractmethod
+  def get_legal_moves(self) -> list:
+    """ Return a list of legal moves """

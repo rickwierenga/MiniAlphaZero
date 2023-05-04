@@ -40,6 +40,8 @@ class TicTacToe(Game):
 
   def get_legal_moves(self):
     """ List of available moves for current player """
+    if self.is_terminal():
+      return []
     return list(zip(*np.where(self.board == 0)))
 
   def next_state(self, action, player):
