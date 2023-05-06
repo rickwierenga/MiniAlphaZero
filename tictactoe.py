@@ -66,7 +66,7 @@ class TicTacToe(Game):
     return hash(str(self.board) + str(self.to_play))
   
 
-def get_human_move(game, player):
+def get_human_move(game):
   while True:
     try:
       row = int(input("Enter a row: "))
