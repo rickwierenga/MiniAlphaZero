@@ -14,9 +14,9 @@ import torch.nn as nn
 from game import Game
 from tictactoe import TicTacToe
 
-NUM_SEARCHES = 300
-NUM_GAMES_SELF_PLAY = 50 # this will be removed once the self play is always running
-NUM_ITERATIONS = 10 # number of iterations of self play, training, and evaluation
+NUM_SEARCHES = 30
+NUM_GAMES_SELF_PLAY = 150 # this will be removed once the self play is always running
+NUM_ITERATIONS = 1000 # number of iterations of self play, training, and evaluation
 NUM_SELF_PLAYERS = 8
 
 NUM_SAMPLING_MOVES = 2
@@ -226,15 +226,19 @@ def self_play(net):
 
   return self_play_buffer
 
-def train(net, optim):
+def train(net, optim, device):
   global buffer
 
   print("  - training -", len(buffer))
 
-  for epoch in range(1):
-    print("epoch", epoch)
+  # move the network to the GPU if available
+  net = net.to(device)
+
+  for epoch in range(10):
     # sample 50% of the buffer
-    for batch in random.sample(buffer, len(buffer) // 3): # TODO: actually sample and use batches,
+    losssum = 0
+    t0 = time.monotonic_ns()
+    for batch in random.sample(buffer, len(buffer)): # TODO: actually sample and use batches, // 3
       game, probabilities, value = batch
       if DEBUG:
         print("  game", game.to_play)
@@ -244,7 +248,12 @@ def train(net, optim):
 
       net.zero_grad() # zeroes the gradient buffers of all parameters. is that necessary?
 
+      # encode board and move probabilities, value
       encoded_board = board2state(game)
+      encoded_board = encoded_board.to(device)
+      probabilities = probabilities.to(device)
+      value = value.to(device)
+
       predicted_policy, predicted_value = net(encoded_board)
 
       loss = F.cross_entropy(predicted_policy, probabilities) + F.mse_loss(predicted_value, value)
@@ -252,8 +261,15 @@ def train(net, optim):
 
       optim.step()
 
+      losssum += loss.item()
+
+    print("epoch", epoch, "loss", losssum, "took", (time.monotonic_ns() - t0) / 1e9, "seconds")
+  
+  # move the network back to the CPU for inference, TODO: check if this is necessary
+  net = net.to(torch.device("cpu"))
+
 def battle(old_net, new_net):
-  NUM_EVALUATION_GAMES = 50
+  NUM_EVALUATION_GAMES = 100
   old_wins = 0
   draws = 0
   new_wins = 0
@@ -294,22 +310,24 @@ def main():
   global buffer
 
   net = Network()
-  optim = torch.optim.Adam(net.parameters(), lr=0.001, weight_decay=1e-5)
+  # check if we can use the MPS backend
+  if torch.backends.mps.is_available():
+    # device = torch.device("mps:0") # this seems to be much slower than cpu
+    device = torch.device("cpu")
+  else:
+    device = torch.device("cpu")
 
   # load model and optimizer if they exist
   if os.path.exists('model.pt') and os.path.exists('optimizer.pt'):
     print("loading model and optimizer...")
     net.load_state_dict(torch.load('model.pt'))
-    optim.load_state_dict(torch.load('optimizer.pt'))
-
-  """
-  if torch.backends.mps.is_available():
-    # device = torch.device("mps") # this seems to be much slower than cpu
-    device = torch.device("cpu")
-  else:
-    device = torch.device("cpu")
-  net.to(device)
-  """
+  
+  # move the network to the GPU if available to create the optimizer there, then cpu for inference
+  net = net.to(device)
+  optim = torch.optim.Adam(net.parameters(), lr=0.001, weight_decay=1e-5)
+  if os.path.exists('model.pt') and os.path.exists('optimizer.pt'):
+    optim.load_state_dict(torch.load('optimizer.pt', map_location=device))
+  net = net.to(torch.device("cpu"))
 
   for iteration in range(NUM_ITERATIONS):
     # copy the network
@@ -324,7 +342,7 @@ def main():
         buffer.extend(result)
       sec = (time.monotonic_ns() - t0) / 1e9
       print("got ", len(buffer), "games in", sec, "seconds") 
-    train(net, optim)
+    train(net, optim, device)
 
     print("\n"*10, "after training")
     _, root = run_mcts(game=TicTacToe(), net=net, num_searches=NUM_SEARCHES, temperature=0)
@@ -342,8 +360,8 @@ def main():
       torch.save(net.state_dict(), 'model.pt')
       torch.save(optim.state_dict(), 'optimizer.pt')
 
-      # keep data from last iteration
-      buffer = buffer[-(NUM_GAMES_SELF_PLAY * NUM_SELF_PLAYERS):]
+      # empty the buffer because we create better games now. TODO: AlphaZero keeps some old games.
+      buffer = []
     else:
       print(" >>> choose OLD model !!!")
       net = net_copy
