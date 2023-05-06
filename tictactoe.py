@@ -4,11 +4,13 @@ from game import Game
 
 
 class TicTacToe(Game):
-  def __init__(self, board=None):
+  def __init__(self, board=None, to_play=1, history=None):
     if board is None:
       self.board = np.zeros((3, 3))
     else:
       self.board = board
+    self.to_play = to_play
+    self.history = [] if history is None else history
 
   def get_winner(self):
     for i in range(3):
@@ -44,15 +46,15 @@ class TicTacToe(Game):
       return []
     return list(zip(*np.where(self.board == 0)))
 
-  def next_state(self, action, player):
+  def next_state(self, action):
     """ Create a new board with the given action """
     if self.board[action[0]][action[1]] != 0:
       raise ValueError("Invalid action")
     board = np.copy(self.board)
     row = action[0]
     col = action[1]
-    board[row][col] = player
-    return TicTacToe(board=board)
+    board[row][col] = self.to_play
+    return TicTacToe(board=board, to_play=-self.to_play, history=self.history + [action])
 
   def get_num_moves(self):
     return np.count_nonzero(self.board == 0)
@@ -60,20 +62,15 @@ class TicTacToe(Game):
   def is_terminal(self):
     return self.get_winner() is not None
 
-  def get_user_action(self):
-    """ Prompt the user for a column to play in """
-    while True:
-      try:
-        row = int(input("Enter a row: "))
-        col = int(input("Enter a column: "))
-        if not (row, col) in self.get_legal_moves():
-          raise ValueError("Invalid move")
-        return (row, col)
-      except ValueError:
-        print("Invalid move")
+  def hash(self) -> int:
+    return hash(str(self.board) + str(self.to_play))
+  
 
-
-
-  def available_moves_mask(self):
-    """ Mask of available moves for current player """
-    return np.where(self.board == 0, 1, 0)
+def get_human_move(game, player):
+  while True:
+    try:
+      row = int(input("Enter a row: "))
+      col = int(input("Enter a column: "))
+      return (row, col), None
+    except ValueError:
+      print("Invalid move")

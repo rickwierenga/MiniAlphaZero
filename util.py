@@ -3,12 +3,15 @@ import time
 from game import Game
 
 
-Agent = Callable[[Game, int], Tuple[Any, float]]
+Action = Any
+Agent = Callable[[Game, int], Tuple[Action, float]]
 
 
 def battle(game: Game, player: Agent, other_player: Agent):
   """ player: 1, other_player: -1 """
   to_play = 1
+
+  history = []
 
   while not game.is_terminal():
     print("\n")
@@ -16,16 +19,22 @@ def battle(game: Game, player: Agent, other_player: Agent):
     print("available moves: ", game.get_legal_moves())
 
     # loop until a valid move is made
-    action = None
     t0 = time.monotonic_ns()
-    while action not in game.get_legal_moves():
+    while True:
       if to_play == 1:
         action, value = player(game, to_play)
       else:
         action, value = other_player(game, to_play)
+      
+      if action not in game.get_legal_moves():
+        print("Invalid move")
+        continue
+      break
 
-    game = game.next_state(action=action, player=to_play)
-    print("player", to_play, "move: ", action, "value: ", value, "thinking time: ", (time.monotonic_ns() - t0) / 1e6, "ms")
+    history.append((game, action, value))
+
+    game = game.next_state(action=action)
+    print(f"player: {to_play} move: {action} value: {value} thinking time: {(time.monotonic_ns() - t0) / 1e6:.3f} ms")
 
     if game.is_terminal():
       print("\n")
@@ -41,6 +50,6 @@ def battle(game: Game, player: Agent, other_player: Agent):
       print("\n")
       print("==== end ====")
       print("\n")
-      break
+      return winner, history
 
     to_play = -to_play

@@ -8,14 +8,7 @@ else:
   from typing_extensions import Self
 
 
-import numpy as np
-
-
 class Game(ABC):
-  @abstractmethod
-  def get_user_action(self) -> np.array:
-    """ Get the user's action """
-
   @abstractmethod
   def print_board(self) -> None:
     """ Print the board in a human-readable format """
@@ -34,3 +27,7 @@ class Game(ABC):
   @abstractmethod
   def get_legal_moves(self) -> list:
     """ Return a list of legal moves """
+
+  @abstractmethod
+  def hash(self) -> int:
+    pass

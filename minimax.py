@@ -3,38 +3,44 @@ from game import Game
 from util import battle
 
 
-def minimax(game: Game, to_play: int, cache = {}):
+def minimax(game: Game, cache = None):
   """ Perform minimax search to find the optimal move. """
 
+  if cache is None: cache = {}
+
   # Check if we've already seen this state
-  board_hash = hash(str(game.board) + str(to_play))
-  if board_hash in cache:
-    return cache[board_hash]
+  if game.hash() in cache:
+    best_move, value = cache[game.hash()]
+    return best_move, value, cache
 
   if game.is_terminal():
-    return None, {
+    value = {
       0: 0,
-      to_play: 1,
-      -to_play: -1
+      game.to_play: 1,
+      -game.to_play: -1
     }[game.get_winner()]
+    cache[game.hash()] = None, value
+    return None, value, cache
 
   # Find the maximum score by recursively searching each possible move
-  max_score = -np.inf
+  best_value = -np.inf
   best_move = None
   for move in game.get_legal_moves():
-    next_state = game.next_state(move, to_play)
-    _, score = minimax(next_state, -to_play)
-    score = -score # flip because we're looking from the other player's perspective
-    if score > max_score:
+    next_game = game.next_state(move)
+    _, value, _ = minimax(next_game, cache)
+    value = -value # flip because we're looking from the other player's perspective
+    if value > best_value:
       best_move = move
-      max_score = score
+      best_value = value
 
-  cache[board_hash] = best_move, max_score
+  cache[game.hash()] = best_move, best_value
 
-  return best_move, max_score
+  return best_move, best_value, cache
 
 
 if __name__ == "__main__":
-  from tictactoe import TicTacToe
-  game = TicTacToe()
+  #from tictactoe import TicTacToe
+  #game = TicTacToe()
+  from connect4 import Connect4
+  game = Connect4()
   battle(game, minimax, minimax)
