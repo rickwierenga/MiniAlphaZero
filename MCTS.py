@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+import tqdm
 
 from game import Game
 from tictactoe import TicTacToe
@@ -238,7 +239,7 @@ def train(net, optim, device):
     # sample 50% of the buffer
     losssum = 0
     t0 = time.monotonic_ns()
-    for batch in random.sample(buffer, len(buffer)): # TODO: actually sample and use batches, // 3
+    for batch in tqdm.tqdm(buffer): # TODO: actually sample and use batches, // 3
       game, probabilities, value = batch
       if DEBUG:
         print("  game", game.to_play)
@@ -296,15 +297,6 @@ def battle(old_net, new_net):
 
   return old_wins, draws, new_wins
 
-def predict(net):
-  encoded_board = board2state(TicTacToe())
-  t0 = time.monotonic_ns()
-  _ = net(encoded_board)
-  if (time.monotonic_ns() - t0) / 1e6 > 10: print("prediction took too long", (time.monotonic_ns() - t0) / 1e6, "ms")
-
-  self_play_buffer = self_play(net)
-  return self_play_buffer
-
 
 def main():
   global buffer
@@ -331,18 +323,20 @@ def main():
 
   for iteration in range(NUM_ITERATIONS):
     # copy the network
-    net_copy = copy.deepcopy(net)
-    optim_copy = copy.deepcopy(optim)
+    new_net = Network()
+    new_net.load_state_dict(net.state_dict())
+    new_optim = torch.optim.Adam(new_net.parameters(), lr=0.001, weight_decay=1e-5)
+    new_optim.load_state_dict(optim.state_dict())
 
     print("iteration", iteration)
     with multiprocessing.Pool(NUM_SELF_PLAYERS) as pool:
       t0 = time.monotonic_ns()
-      results = pool.map(predict, [net]*NUM_SELF_PLAYERS)
+      results = pool.map(self_play, [net]*NUM_SELF_PLAYERS)
       for result in results:
         buffer.extend(result)
       sec = (time.monotonic_ns() - t0) / 1e9
       print("got ", len(buffer), "games in", sec, "seconds") 
-    train(net, optim, device)
+    train(new_net, new_optim, device)
 
     print("\n"*10, "after training")
     _, root = run_mcts(game=TicTacToe(), net=net, num_searches=NUM_SEARCHES, temperature=0)
@@ -351,7 +345,7 @@ def main():
     # exit()
 
     # play against previous version
-    old_wins, draws, new_wins = battle(old_net=net_copy, new_net=net)
+    old_wins, draws, new_wins = battle(old_net=net, new_net=new_net)
     print("old wins", old_wins, "draws", draws, "new wins", new_wins)
     if new_wins / (old_wins + new_wins) >= 0.55: # new model wins more than 55% of the time
       print(" >>> choose NEW model !!!")
@@ -362,10 +356,12 @@ def main():
 
       # empty the buffer because we create better games now. TODO: AlphaZero keeps some old games.
       buffer = []
+
+      # copy the network
+      net = new_net
+      optim = new_optim
     else:
       print(" >>> choose OLD model !!!")
-      net = net_copy
-      optim = optim_copy
 
 
 if __name__ == "__main__":
