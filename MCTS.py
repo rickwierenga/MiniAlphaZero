@@ -123,7 +123,7 @@ def uct_score(node: Node, parent: Node):
   # C = math.log((parent.visit_count + config.pb_c_base + 1) /
   #                 config.pb_c_base) + config.pb_c_init
   prior_score = C * node.prior * np.sqrt(parent.visit_count) / (1 + node.visit_count) # U
-  return node.get_value() + prior_score
+  return -node.get_value() + prior_score # flip value because we're looking from the other player's perspective
 
 def expand(node: Node, game: Game, net: Network):
   # obtain the policy and value from the network
