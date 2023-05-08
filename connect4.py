@@ -4,10 +4,12 @@ from game import Game
 
 
 class Connect4(Game):
-  def __init__(self):
-    self.board = np.zeros((6, 7), dtype=int)
+  def __init__(self, board=None, history=None, to_play=1):
+    self.board = np.zeros((7, 6), dtype=int) if board is None else board
     self.num_rows, self.num_cols = self.board.shape
+    self.history = [] if history is None else history
     self.winning_length = 4
+    self.to_play = to_play
 
   def is_valid_move(self, col):
     if col < 0 or col >= self.num_cols:
@@ -65,17 +67,6 @@ class Connect4(Game):
       print(row_str)
     print("-" * (self.num_cols * 4 + 1))
 
-  def get_user_action(self):
-    """ Prompt the user for a column to play in """
-    while True:
-      try:
-        col = int(input("Enter a column: "))
-        if self.is_valid_move(col):
-          return col
-        print("Invalid move")
-      except ValueError:
-        print("Invalid move")
-    
   def get_legal_moves(self):
     """ Return a list of legal moves """
     return [c for c in range(self.num_cols) if self.is_valid_move(c)]
@@ -84,42 +75,17 @@ class Connect4(Game):
     """ Return True if the game is over """
     return self.get_winner() != 0 or self.is_board_full()
   
-  def next_state(self, action, player):
+  def next_state(self, action):
     """ Return a new Connect4 object with the given action played """
 
     if not self.is_valid_move(action):
       raise ValueError("Invalid move")
 
-    new_state = Connect4()
-    new_state.board = np.copy(self.board)
+    new_board = np.copy(self.board)
     row = self.get_next_open_row(action)
-    new_state.board[row][action] = player
+    new_board[row][action] = self.to_play
+    new_state = Connect4(board=new_board, to_play=-self.to_play, history=self.history + [action])
     return new_state
  
-
-
-# def play():
-#     game = Connect4()
-#     player = 1
-#     while True:
-#         game.print_board()
-#         col = int(input("Player {}'s turn. Enter a column: ".format(player)))
-#         if not game.play_move(col, player):
-#             print("Invalid move")
-#             continue
-#         winner = game.get_winner()
-#         if winner != 0:
-#             game.print_board()
-#             print("Player {} wins!".format(winner))
-#             break
-#         if game.is_board_full():
-#             game.print_board()
-#             print("Draw!")
-#             break
-#         player = -player
-
-#     print(game.board)
-
-
-# if __name__ == "__main__":
-#     play()
+  def hash(self) -> int:
+    return hash(str(self.board) + str(self.to_play))
