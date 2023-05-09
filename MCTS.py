@@ -3,8 +3,10 @@
 import copy
 import multiprocessing
 import os
+import pickle
 import random
 import time
+from typing import List
 
 import numpy as np
 import torch
@@ -15,14 +17,16 @@ import tqdm
 from game import Game
 from connect4 import Connect4
 
-NUM_SEARCHES = 50
-NUM_GAMES_SELF_PLAY = 200 # this will be removed once the self play is always running
+NUM_SEARCHES = 64
+NUM_GAMES_SELF_PLAY = 400 # this will be removed once the self play is always running
 NUM_ITERATIONS = 1000 # number of iterations of self play, training, and evaluation
-NUM_SELF_PLAYERS = 8
+NUM_SELF_PLAYERS = 4
 
 NUM_SAMPLING_MOVES = 5 # connect 4: 5, tttt: 2
 
-C = 1.41
+VIRTUAL_LOSS = 3
+
+C = 2 # 1.41
 
 DEBUG = os.environ.get("DEBUG", 0)
 if DEBUG:
@@ -126,17 +130,18 @@ def uct_score(node: Node, parent: Node):
   prior_score = C * node.prior * np.sqrt(parent.visit_count) / (1 + node.visit_count) # U
   return -node.get_value() + prior_score # flip value because we're looking from the other player's perspective
 
-def expand(node: Node, game: Game, net: Network):
+def expand(leaf_nodes: List[Node], games: List[Game], net: Network):
   # obtain the policy and value from the network
-  encoded_board = board2state(game)
+  encoded_boards = torch.stack([board2state(game) for game in games])
   with torch.no_grad():
-    policy, value = net(encoded_board)
+    policies, values = net(encoded_boards)
 
   # for each available action, add a new state to the tree
-  for action in game.get_legal_moves():
-    node.add_child(action=action, prior=policy[action]) # action indexes into policy, which is a 3x3 matrix
+  for leaf_node, game, policy in zip(leaf_nodes, games, policies):
+    for action in game.get_legal_moves():
+      leaf_node.add_child(action=action, prior=policy[action]) # action indexes into policy, which is a 3x3 matrix
 
-  return value
+  return values
 
 def select_action(node: Node, temperature: float):
   if temperature == 0: # strongest move: the one with the highest visit count
@@ -163,25 +168,43 @@ def run_mcts(game: Game, net: Network, num_searches: int, temperature: float, ro
   noise = torch.distributions.dirichlet.Dirichlet(torch.ones((num_actions,)) * epsilon).sample()
   for i, node in enumerate(root.children.values()):
     node.prior = (1 - epsilon) * node.prior + epsilon * noise[i]
+  
+  num_simultaneous_searches = 16
+  for _ in range(num_searches // num_simultaneous_searches):
+    paths = []
+    scratch_games = []
 
-  for _ in range(num_searches):
-    # select a leaf node according to UCT
-    node = root
-    path = [node]
-    scratch_game = copy.deepcopy(game)
-    while node.get_expanded():
-      action, node = max(node.children.items(), key=lambda x: uct_score(node=x[1], parent=node))
-      path.append(node)
-      scratch_game = scratch_game.next_state(action=action) 
+    # Collect 16 paths, a different one using virtual loss. In Real AlphaZero this is parallelized, but that's
+    # hard for us because multiprocessing copies memory (overhead + virtual loss does not work), and Python threading
+    # is affected by the GIL.
+    for _ in range(num_simultaneous_searches):
+      # select a leaf node according to UCT
+      node = root
+      path = [node]
+      scratch_game = copy.deepcopy(game)
+      while node.get_expanded():
+        action, node = max(node.children.items(), key=lambda x: uct_score(node=x[1], parent=node))
+        path.append(node)
+        scratch_game = scratch_game.next_state(action=action) 
+        node.visit_count += VIRTUAL_LOSS
+        node.value_sum -= VIRTUAL_LOSS
+      scratch_games.append(scratch_game)
+      paths.append(path)
+    
+    # Compute the value and policy for each leaf node in a batch.
+    # These are the values from the perspective of who's to play in the leaf node.
+    leaf_nodes = [path[-1] for path in paths]
+    values = expand(games=scratch_games, leaf_nodes=leaf_nodes, net=net)
 
-    # expand the leaf node
-    value = expand(node=node, net=net, game=scratch_game)
-    # this is the value from the perspective of who's to play in the leaf node.
+    # backpropagate through each path
+    for path, value, scratch_game in zip(paths, values, scratch_games):
+      for node in path:
+        node.value_sum += value if node.to_play == scratch_game.to_play else -value
+        node.visit_count += 1
 
-    # backpropagate
-    for node in path:
-      node.value_sum += value if node.to_play == scratch_game.to_play else -value
-      node.visit_count += 1
+        if node is not path[0]: # skip the root node
+          node.visit_count -= VIRTUAL_LOSS
+          node.value_sum += VIRTUAL_LOSS
 
   # Return the action to play and the action probabilities (normalized visit counts).
   temperature = 1 if len(game.history) < NUM_SAMPLING_MOVES and explore else 0
@@ -191,8 +214,6 @@ def run_mcts(game: Game, net: Network, num_searches: int, temperature: float, ro
     print("choosing", action)
   return action
 
-
-buffer = []
 
 def self_play(net, game_num):
   self_play_buffer = []
@@ -227,39 +248,39 @@ def self_play(net, game_num):
 
   return self_play_buffer
 
-def train(net, optim, device):
-  global buffer
-
+def train(net, optim, device, buffer):
   print("  - training -", len(buffer))
 
   # move the network to the GPU if available
   net = net.to(device)
 
-  NUM_EPOCHS = 10
+  NUM_EPOCHS = 20
 
   for epoch in range(NUM_EPOCHS):
     # sample 50% of the buffer
     losssum = 0
     t0 = time.monotonic_ns()
-    for batch in tqdm.tqdm(buffer):
-      game, probabilities, value = batch
-      if DEBUG:
-        print("  game", game.to_play)
-        game.print_board()
-        print("probabilities", probabilities, "value", value)
-      value = torch.tensor([[value]], dtype=torch.float32) # add batch dimension
+    batch_size = 64
+    num_batches = len(buffer) // batch_size
+    random.shuffle(buffer)
+    batches = [buffer[i * batch_size:(i + 1) * batch_size] for i in range(num_batches)]
+
+    for batch in tqdm.tqdm(batches):
+      values = torch.tensor([value for _, _, value in batch], dtype=torch.float32).unsqueeze(1)
+      probabilities = torch.stack([probabilities for _, probabilities, _ in batch])
+      games = [game for game, _, _ in batch]
+
+      # encode board and move probabilities, value
+      encoded_boards = torch.stack([board2state(game) for game in games])
+      encoded_boards = encoded_boards.to(device)
+      probabilities = probabilities.to(device)
+      values = values.to(device)
 
       net.zero_grad() # zeroes the gradient buffers of all parameters. is that necessary?
 
-      # encode board and move probabilities, value
-      encoded_board = board2state(game)
-      encoded_board = encoded_board.to(device)
-      probabilities = probabilities.to(device)
-      value = value.to(device)
+      predicted_policies, predicted_values = net(encoded_boards)
 
-      predicted_policy, predicted_value = net(encoded_board)
-
-      loss = F.cross_entropy(predicted_policy, probabilities) + F.mse_loss(predicted_value, value)
+      loss = F.cross_entropy(predicted_policies, probabilities) + F.mse_loss(predicted_values, values)
       loss.backward()
 
       optim.step()
@@ -272,6 +293,7 @@ def train(net, optim, device):
   net = net.to(torch.device("cpu"))
 
 def _battle_game(old_net, new_net, game_num):
+  t0 = time.monotonic_ns()
   game = Connect4()
   old_net_player = 1 if game_num % 2 == 1 else -1
 
@@ -282,7 +304,7 @@ def _battle_game(old_net, new_net, game_num):
     game = game.next_state(action=action)
 
   winner = game.get_winner()
-  print('  eval play game', game_num, "winner", winner, "old player won", winner == old_net_player)
+  print('  eval play game', game_num, "winner", winner, "old player won", winner == old_net_player, "in", (time.monotonic_ns() - t0) / 1e9, "seconds")
   return {
     old_net_player: -1,
     0: 0,
@@ -306,36 +328,42 @@ def battle(old_net, new_net):
 
 
 def main():
-  global buffer
+  SELF_PLAY_GAMES_FN = "self-play-games.pickle"
+
+  buffer = []
+  if os.path.exists(SELF_PLAY_GAMES_FN):
+    print("loading self play games...")
+    with open(SELF_PLAY_GAMES_FN, "rb") as f:
+      buffer = pickle.load(f)
 
   MODEL_FN = "connect4-model.pt"
   OPTIMIZER_FN = "connect4-optimizer.pt"
 
   # net = Network()
-  net = Network(board_size=(7, 6), policy_shape=(7,), num_layers=4)
+  net = Network(board_size=(7, 6), policy_shape=(7,), num_layers=15)
   # check if we can use the MPS backend
   if torch.backends.mps.is_available():
-    # device = torch.device("mps:0") # this seems to be much slower than cpu
-    device = torch.device("cpu")
+    device = torch.device("mps:0") # this seems to be much slower than cpu
+    #device = torch.device("cpu")
   else:
     device = torch.device("cpu")
 
   # load model and optimizer if they exist
   if os.path.exists(MODEL_FN) and os.path.exists(OPTIMIZER_FN):
     print("loading model and optimizer...")
-    net.load_state_dict(torch.load(MODEL_FN))
+    net.load_state_dict(torch.load(MODEL_FN, map_location=device))
   
   # move the network to the GPU if available to create the optimizer there, then cpu for inference
-  net = net.to(device)
+  net.to(device)
   optim = torch.optim.Adam(net.parameters(), lr=0.001, weight_decay=1e-5)
   if os.path.exists(MODEL_FN) and os.path.exists(OPTIMIZER_FN):
     optim.load_state_dict(torch.load(OPTIMIZER_FN, map_location=device))
-  net = net.to(torch.device("cpu"))
+  net = net.to(torch.device("cpu")) # back to cpu for inference
 
   for iteration in range(NUM_ITERATIONS):
     # copy the network
     # new_net = Network()
-    new_net = Network(board_size=(7, 6), policy_shape=(7,), num_layers=6)
+    new_net = Network(board_size=(7, 6), policy_shape=(7,), num_layers=15)
     new_net.load_state_dict(net.state_dict())
     new_optim = torch.optim.Adam(new_net.parameters(), lr=0.001, weight_decay=1e-5)
     new_optim.load_state_dict(optim.state_dict())
@@ -348,13 +376,8 @@ def main():
       buffer.extend(results)
       sec = (time.monotonic_ns() - t0) / 1e9
       print("got ", len(results), "states in", sec, "seconds") 
-    train(new_net, new_optim, device)
 
-    print("\n"*10, "after training")
-    _, root = run_mcts(game=Connect4(), net=net, num_searches=NUM_SEARCHES, temperature=0)
-    root.visualize()
-
-    # exit()
+    train(new_net, new_optim, device, buffer)
 
     # play against previous version
     old_wins, draws, new_wins = battle(old_net=net, new_net=new_net)
@@ -374,6 +397,10 @@ def main():
       optim = new_optim
     else:
       print(" >>> choose OLD model !!!")
+
+      # save self play games
+      with open(SELF_PLAY_GAMES_FN, "wb") as f:
+        pickle.dump(buffer, f)
 
     torch.save(new_net.state_dict(), f"connect4-model-{iteration}.pt")
     torch.save(new_optim.state_dict(), f"connect4-optim-{iteration}.pt")

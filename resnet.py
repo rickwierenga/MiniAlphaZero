@@ -51,10 +51,9 @@ class Network(nn.Module):
     self.relu = nn.ReLU(inplace=True)
 
     # residual blocks
-    self.blocks = []
-    for _ in range(num_layers):
-      block = ResidualBlock(self.num_channels, self.num_channels, stride=1)
-      self.blocks.append(block)
+    self.blocks = nn.Sequential(*[
+      ResidualBlock(self.num_channels, self.num_channels, stride=1) for _ in range(num_layers)
+    ])
 
     # policy head
     self.policy_head = nn.Sequential(
@@ -92,9 +91,9 @@ class Network(nn.Module):
     # residual blocks
     for block in self.blocks:
       x = block(x)
-
+    
     # policy and value head
     x_value = self.value_head(x)
     x_policy = self.policy_head(x)
-    x_policy = x_policy.reshape(self.policy_shape)
+    x_policy = x_policy.reshape((-1,) + self.policy_shape)
     return x_policy, x_value
