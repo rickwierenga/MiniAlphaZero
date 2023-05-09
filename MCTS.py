@@ -17,14 +17,16 @@ import tqdm
 from game import Game
 from connect4 import Connect4
 
-NUM_SEARCHES = 64
-NUM_GAMES_SELF_PLAY = 400 # this will be removed once the self play is always running
+NUM_SEARCHES = 480
+NUM_GAMES_SELF_PLAY = 2000 # this will be removed once the self play is always running
 NUM_ITERATIONS = 1000 # number of iterations of self play, training, and evaluation
-NUM_SELF_PLAYERS = 4
+NUM_SELF_PLAYERS = 8
+NUM_EPOCHS = 20
 
-NUM_SAMPLING_MOVES = 5 # connect 4: 5, tttt: 2
+NUM_SAMPLING_MOVES = 10 # connect 4: 10, tttt: 2
+NUM_EVALUATION_GAMES = 100
 
-VIRTUAL_LOSS = 3
+VIRTUAL_LOSS = 3.1 # use non integer value, to avoid uct from getting 0 visit counts :)
 
 C = 2 # 1.41
 
@@ -37,6 +39,8 @@ if DEBUG:
   NUM_GAMES_SELF_PLAY = 1
   NUM_SELF_PLAYERS = 1
   NUM_ITERATIONS = 1
+  NUM_EPOCHS = 1
+  NUM_EVALUATION_GAMES = 1
 
 
 class Node:
@@ -116,7 +120,7 @@ from resnet import Network
 
 def board2state(game):
 #   state = torch.zeros((3, 3, 3))
-  state = torch.zeros((3, 7, 6))
+  state = torch.zeros((3, 6, 7))
   board = torch.tensor(game.board)
   state[0, :, :] = board == 1
   state[1, :, :] = board == -1
@@ -150,6 +154,7 @@ def select_action(node: Node, temperature: float):
   # select an action according to the visit counts
   visit_counts = np.array([child.visit_count for child in node.children.values()])
   visit_counts = visit_counts ** (1 / temperature)
+  assert visit_counts.sum() != 0
   visit_counts = visit_counts / visit_counts.sum()
   # hacky, but numpy does not like us selecting from a list of tuples (thinks it's 2d)
   action_index = np.random.choice(len(visit_counts), p=visit_counts)
@@ -160,15 +165,15 @@ def run_mcts(game: Game, net: Network, num_searches: int, temperature: float, ro
   # start by expanding the root node
   if root is None:
     root = Node(to_play=game.to_play, prior=0)
-    expand(node=root, net=net, game=game)
+    expand(leaf_nodes=[root], net=net, games=[game])
 
   # add Dirichlet noise to the root node
-  epsilon = 0.5
+  epsilon = 0.3
   num_actions = len(root.children)
   noise = torch.distributions.dirichlet.Dirichlet(torch.ones((num_actions,)) * epsilon).sample()
   for i, node in enumerate(root.children.values()):
     node.prior = (1 - epsilon) * node.prior + epsilon * noise[i]
-  
+
   num_simultaneous_searches = 16
   for _ in range(num_searches // num_simultaneous_searches):
     paths = []
@@ -237,6 +242,8 @@ def self_play(net, game_num):
     game = game.next_state(action=action)
     if game_num % 100 == 0:
       game.print_board()
+      print(mcts_policy)
+      print()
 
     root = root.children[action] # reuse the tree
 
@@ -244,7 +251,7 @@ def self_play(net, game_num):
   for game, probabilities in game_buffer:
     self_play_buffer.append((game, probabilities, winner * game.to_play)) # trick: multiply by the winner to flip the sign if the winner is -1
 
-  print(f'  self play game {game_num:03} winner {winner:02} took {(time.monotonic_ns() - t) / 1e9:0.2f} seconds')
+  print(f'  self play game {game_num:04} winner {winner:02} took {(time.monotonic_ns() - t) / 1e9:0.2f} seconds')
 
   return self_play_buffer
 
@@ -254,14 +261,13 @@ def train(net, optim, device, buffer):
   # move the network to the GPU if available
   net = net.to(device)
 
-  NUM_EPOCHS = 20
+  batch_size = 128
+  num_batches = len(buffer) // batch_size
 
   for epoch in range(NUM_EPOCHS):
     # sample 50% of the buffer
     losssum = 0
     t0 = time.monotonic_ns()
-    batch_size = 64
-    num_batches = len(buffer) // batch_size
     random.shuffle(buffer)
     batches = [buffer[i * batch_size:(i + 1) * batch_size] for i in range(num_batches)]
 
@@ -312,7 +318,6 @@ def _battle_game(old_net, new_net, game_num):
   }[winner]
 
 def battle(old_net, new_net):
-  NUM_EVALUATION_GAMES = 100
   old_wins = 0
   draws = 0
 
@@ -340,7 +345,7 @@ def main():
   OPTIMIZER_FN = "connect4-optimizer.pt"
 
   # net = Network()
-  net = Network(board_size=(7, 6), policy_shape=(7,), num_layers=15)
+  net = Network(board_size=(6, 7), policy_shape=(7,), num_layers=10)
   # check if we can use the MPS backend
   if torch.backends.mps.is_available():
     device = torch.device("mps:0") # this seems to be much slower than cpu
@@ -351,8 +356,8 @@ def main():
   # load model and optimizer if they exist
   if os.path.exists(MODEL_FN) and os.path.exists(OPTIMIZER_FN):
     print("loading model and optimizer...")
-    net.load_state_dict(torch.load(MODEL_FN, map_location=device))
-  
+    net.load_state_dict(torch.load(MODEL_FN))
+
   # move the network to the GPU if available to create the optimizer there, then cpu for inference
   net.to(device)
   optim = torch.optim.Adam(net.parameters(), lr=0.001, weight_decay=1e-5)
@@ -363,8 +368,9 @@ def main():
   for iteration in range(NUM_ITERATIONS):
     # copy the network
     # new_net = Network()
-    new_net = Network(board_size=(7, 6), policy_shape=(7,), num_layers=15)
+    new_net = Network(board_size=(6, 7), policy_shape=(7,), num_layers=10)
     new_net.load_state_dict(net.state_dict())
+    new_net.to(device)
     new_optim = torch.optim.Adam(new_net.parameters(), lr=0.001, weight_decay=1e-5)
     new_optim.load_state_dict(optim.state_dict())
 
@@ -376,6 +382,10 @@ def main():
       buffer.extend(results)
       sec = (time.monotonic_ns() - t0) / 1e9
       print("got ", len(results), "states in", sec, "seconds") 
+
+    # save self play games
+    with open(SELF_PLAY_GAMES_FN, "wb") as f:
+      pickle.dump(buffer, f)
 
     train(new_net, new_optim, device, buffer)
 
@@ -389,18 +399,14 @@ def main():
       torch.save(net.state_dict(), MODEL_FN)
       torch.save(optim.state_dict(), OPTIMIZER_FN)
 
-      # empty the buffer because we create better games now. TODO: AlphaZero keeps some old games.
-      buffer = []
+      # Keep the last 100 000 states only.
+      buffer = buffer[-100000:]
 
       # copy the network
       net = new_net
       optim = new_optim
     else:
       print(" >>> choose OLD model !!!")
-
-      # save self play games
-      with open(SELF_PLAY_GAMES_FN, "wb") as f:
-        pickle.dump(buffer, f)
 
     torch.save(new_net.state_dict(), f"connect4-model-{iteration}.pt")
     torch.save(new_optim.state_dict(), f"connect4-optim-{iteration}.pt")

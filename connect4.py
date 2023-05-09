@@ -5,7 +5,7 @@ from game import Game
 
 class Connect4(Game):
   def __init__(self, board=None, history=None, to_play=1):
-    self.board = np.zeros((7, 6), dtype=int) if board is None else board
+    self.board = np.zeros((6, 7), dtype=int) if board is None else board
     self.num_rows, self.num_cols = self.board.shape
     self.history = [] if history is None else history
     self.winning_length = 4
@@ -89,3 +89,10 @@ class Connect4(Game):
  
   def hash(self) -> int:
     return hash(str(self.board) + str(self.to_play))
+
+def get_human_move(game):
+  while True:
+    try:
+      num = int(input("Enter column: "))
+    except ValueError:
+      print("invalid num")
