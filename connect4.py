@@ -94,5 +94,6 @@ def get_human_move(game):
   while True:
     try:
       num = int(input("Enter column: "))
+      return num, None
     except ValueError:
       print("invalid num")

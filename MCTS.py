@@ -360,12 +360,12 @@ def main():
     print("loading model and optimizer...")
     net.load_state_dict(torch.load(MODEL_FN))
 
-  # move the network to the GPU if available to create the optimizer there, then cpu for inference
+  # move the network to the GPU if available to create the optimizer there, then cpu for multiprocessing
   net.to(device)
   optim = torch.optim.Adam(net.parameters(), lr=0.001, weight_decay=1e-5)
   if os.path.exists(MODEL_FN) and os.path.exists(OPTIMIZER_FN):
     optim.load_state_dict(torch.load(OPTIMIZER_FN, map_location=device))
-  net = net.to(torch.device("cpu")) # back to cpu for inference
+  net = net.to(torch.device("cpu")) # back to cpu for multiprocessing
 
   for iteration in range(NUM_ITERATIONS):
     # copy the network
@@ -401,14 +401,14 @@ def main():
       torch.save(net.state_dict(), MODEL_FN)
       torch.save(optim.state_dict(), OPTIMIZER_FN)
 
-      # Keep the last 100 000 states only.
-      buffer = buffer[-100000:]
-
       # copy the network
       net = new_net
       optim = new_optim
     else:
       print(" >>> choose OLD model !!!")
+
+    # Keep the last 100 000 states only.
+    buffer = buffer[-100000:]
 
     torch.save(new_net.state_dict(), f"connect4-model-{iteration}.pt")
     torch.save(new_optim.state_dict(), f"connect4-optim-{iteration}.pt")
