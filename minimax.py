@@ -11,7 +11,7 @@ def minimax(game: Game, cache = None, depth=0, max_depth=None):
   # Check if we've already seen this state
   if game.hash() in cache:
     best_move, value = cache[game.hash()]
-    return best_move, value, cache
+    return best_move, value
 
   if game.is_terminal():
     value = {
@@ -20,7 +20,7 @@ def minimax(game: Game, cache = None, depth=0, max_depth=None):
       -game.to_play: -1
     }[game.get_winner()]
     cache[game.hash()] = None, value
-    return None, value, cache
+    return None, value
 
   if max_depth is not None and depth >= max_depth:
     return None, 0, cache
@@ -30,7 +30,7 @@ def minimax(game: Game, cache = None, depth=0, max_depth=None):
   best_move = None
   for move in game.get_legal_moves():
     next_game = game.next_state(move)
-    _, value, _ = minimax(next_game, cache, depth=depth+1, max_depth=max_depth)
+    _, value = minimax(next_game, cache, depth=depth+1, max_depth=max_depth)
     value = -value # flip because we're looking from the other player's perspective
     if value > best_value:
       best_move = move
@@ -38,7 +38,7 @@ def minimax(game: Game, cache = None, depth=0, max_depth=None):
 
   cache[game.hash()] = best_move, best_value
 
-  return best_move, best_value, cache
+  return best_move, best_value
 
 
 if __name__ == "__main__":
