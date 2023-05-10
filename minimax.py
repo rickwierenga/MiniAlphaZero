@@ -5,6 +5,7 @@ from util import battle
 
 def minimax(game: Game, cache = None, depth=0, max_depth=None):
   """ Perform minimax search to find the optimal move. """
+  # TODO randomize actions when multiple actions have the same value
 
   if cache is None: cache = {}
 

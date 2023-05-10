@@ -21,9 +21,21 @@ def MCTSvsMiniMax():
     # Agent that can be called with game and net and returns action and value
     agent_mcts = lambda game: alphazero_agent(game, net)
     # Agent that can be called with game and returns action and value
-    agent_minimax = lambda game: minimax(game, max_depth=3)
+    agent_minimax = lambda game: minimax(game, max_depth=1)
     # Play against minimax
-    battle(Connect4(), agent_mcts, agent_minimax)
+    # Repeat some number of times to estimate performance
+    N_REPEATS = 1
+    n_wins_mcts = 0
+    for _ in range(N_REPEATS):
+        # MCTS plays first
+        win, _ = battle(Connect4(), agent_mcts, agent_minimax, False)
+        if win == 1:
+            n_wins_mcts += 1
+        # MCTS plays second
+        win, _ = battle(Connect4(), agent_minimax, agent_mcts, False)
+        if win == -1:
+            n_wins_mcts += 1
+    print(f"MCTS wins from MiniMax in {100*n_wins_mcts/(N_REPEATS*2)}% of games")
     
 if __name__ == "__main__":
     MCTSvsMiniMax()
