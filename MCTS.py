@@ -350,6 +350,8 @@ def main():
   if torch.backends.mps.is_available():
     device = torch.device("mps:0") # this seems to be much slower than cpu
     #device = torch.device("cpu")
+  elif torch.cuda.is_available():
+    device = torch.device("cuda:0")
   else:
     device = torch.device("cpu")
 
