@@ -14,9 +14,6 @@ def minimax(game: Game, cache = None, depth=0, max_depth=None):
     best_move, value = cache[game.hash()]
     return best_move, value
 
-  if max_depth is not None and depth >= max_depth:
-    return None, 0
-
   if game.is_terminal():
     value = {
       0: 0,
@@ -25,6 +22,9 @@ def minimax(game: Game, cache = None, depth=0, max_depth=None):
     }[game.get_winner()]
     cache[game.hash()] = None, value
     return None, value
+
+  if max_depth is not None and depth >= max_depth:
+    return None, 0, cache
 
   # Find the maximum score by recursively searching each possible move
   best_value = -np.inf
