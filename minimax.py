@@ -5,12 +5,13 @@ from util import battle
 
 def minimax(game: Game, cache = None, depth=0, max_depth=None):
   """ Perform minimax search to find the optimal move. """
-
   if cache is None: cache = {}
 
   # Check if we've already seen this state
   if game.hash() in cache:
-    best_move, value = cache[game.hash()]
+    best_moves, value = cache[game.hash()]
+    # Randomly choose between moves of equal value
+    best_move = np.random.choice(best_moves)
     return best_move, value
 
   if game.is_terminal():
@@ -19,25 +20,28 @@ def minimax(game: Game, cache = None, depth=0, max_depth=None):
       game.to_play: 1,
       -game.to_play: -1
     }[game.get_winner()]
-    cache[game.hash()] = None, value
+    cache[game.hash()] = [None], value
     return None, value
 
   if max_depth is not None and depth >= max_depth:
-    return None, 0, cache
+    return None, 0
 
   # Find the maximum score by recursively searching each possible move
   best_value = -np.inf
-  best_move = None
+  best_moves = []
   for move in game.get_legal_moves():
     next_game = game.next_state(move)
     _, value = minimax(next_game, cache, depth=depth+1, max_depth=max_depth)
     value = -value # flip because we're looking from the other player's perspective
-    if value > best_value:
-      best_move = move
+    if value >= best_value:
       best_value = value
+      best_moves.append(move)
+  if len(best_moves) == 0:
+    best_moves.append(None) # TODO needed?
 
-  cache[game.hash()] = best_move, best_value
-
+  cache[game.hash()] = best_moves, best_value
+  # Randomly choose between moves of equal value
+  best_move = np.random.choice(best_moves)
   return best_move, best_value
 
 
