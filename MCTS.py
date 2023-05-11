@@ -14,14 +14,17 @@ import torch.nn.functional as F
 import torch.nn as nn
 import tqdm
 
-from game import Game
 from connect4 import Connect4
+from game import Game
+from resnet import Network
 
 NUM_SEARCHES = 480
 NUM_GAMES_SELF_PLAY = 2000 # this will be removed once the self play is always running
 NUM_ITERATIONS = 1000 # number of iterations of self play, training, and evaluation
 NUM_SELF_PLAYERS = 8
 NUM_EPOCHS = 20
+NUM_SIMULTANEOUS_SEARCHES = 16
+BATCH_SIZE = 128
 
 NUM_SAMPLING_MOVES = 10 # connect 4: 10, tttt: 2
 NUM_EVALUATION_GAMES = 100
@@ -36,11 +39,14 @@ if DEBUG:
   np.random.seed(0)
   torch.manual_seed(0)
 
+  NUM_SEARCHES = 10
+  BATCH_SIZE = 1
   NUM_GAMES_SELF_PLAY = 1
   NUM_SELF_PLAYERS = 1
   NUM_ITERATIONS = 1
   NUM_EPOCHS = 1
   NUM_EVALUATION_GAMES = 1
+  NUM_SIMULTANEOUS_SEARCHES = 1
 
 
 class Node:
@@ -70,53 +76,6 @@ class Node:
       print("  " * level, action, node)
       node.visualize(level=level + 1)
 
-
-# class Network(nn.Module):
-#   def __init__(self):
-#     # input: 4x3x3 (3x3 board, 4 channels: player 1, player -1, empty, current player)
-#     # TODO: add a batch dimension
-
-#     super().__init__()
-
-#     self.network = nn.Sequential(
-#       nn.Conv2d(4, 16, kernel_size=3, stride=1, padding=1),
-#       nn.ReLU(),
-#       nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1),
-#       nn.ReLU(),
-#       nn.Flatten(),
-#       nn.Linear(16 * 3 * 3, 8 * 3 * 3),
-#       nn.ReLU(),
-#       nn.Linear(8 * 3 * 3, 6 * 3 * 3),
-#       nn.ReLU(),
-#       nn.Linear(6 * 3 * 3, 4 * 3 * 3),
-#       nn.ReLU(),
-#     )
-
-#     # output: scalar (value of the current state)
-#     self.value_head = nn.Sequential(
-#       nn.Linear(4 * 3 * 3, 20),
-#       nn.ReLU(),
-#       nn.Linear(20, 1),
-#       nn.Tanh()
-#     )
-
-#     # output: 3x3 (3x3 board, where should the next move be played)
-#     self.policy_head = nn.Sequential(
-#       nn.Linear(4 * 3 * 3, 25),
-#       nn.ReLU(),
-#       nn.Linear(25, 3 * 3),
-#       nn.Softmax(dim=1) # dim=1, why?
-#     )
-
-#   def forward(self, encoded_board):
-#     x = encoded_board
-#     x = x.unsqueeze(0) # add batch dimension
-#     x = self.network(x)
-#     x_value = self.value_head(x)
-#     x_policy = self.policy_head(x)
-#     x_policy = x_policy.reshape((3, 3)) # ?
-#     return x_policy, x_value
-from resnet import Network
 
 def board2state(game):
 #   state = torch.zeros((3, 3, 3))
@@ -161,28 +120,28 @@ def select_action(node: Node, temperature: float):
   action = list(node.children.keys())[action_index]
   return action
 
-def run_mcts(game: Game, net: Network, num_searches: int, temperature: float, root=None, explore: bool = True):
+def run_mcts(game: Game, net: Network, num_searches: int, temperature=None, root=None, explore: bool = True):
   # start by expanding the root node
   if root is None:
     root = Node(to_play=game.to_play, prior=0)
     expand(leaf_nodes=[root], net=net, games=[game])
 
   # add Dirichlet noise to the root node
-  epsilon = 0.3
+  epsilon = 0.25
+  dir_noise = 0.3
   num_actions = len(root.children)
-  noise = torch.distributions.dirichlet.Dirichlet(torch.ones((num_actions,)) * epsilon).sample()
+  noise = torch.distributions.dirichlet.Dirichlet(torch.ones((num_actions,)) * dir_noise).sample()
   for i, node in enumerate(root.children.values()):
     node.prior = (1 - epsilon) * node.prior + epsilon * noise[i]
 
-  num_simultaneous_searches = 16
-  for _ in range(num_searches // num_simultaneous_searches):
+  for _ in range(num_searches // NUM_SIMULTANEOUS_SEARCHES):
     paths = []
     scratch_games = []
 
     # Collect 16 paths, a different one using virtual loss. In Real AlphaZero this is parallelized, but that's
     # hard for us because multiprocessing copies memory (overhead + virtual loss does not work), and Python threading
     # is affected by the GIL.
-    for _ in range(num_simultaneous_searches):
+    for _ in range(NUM_SIMULTANEOUS_SEARCHES):
       # select a leaf node according to UCT
       node = root
       path = [node]
@@ -195,7 +154,7 @@ def run_mcts(game: Game, net: Network, num_searches: int, temperature: float, ro
         node.value_sum -= VIRTUAL_LOSS
       scratch_games.append(scratch_game)
       paths.append(path)
-    
+
     # Compute the value and policy for each leaf node in a batch.
     # These are the values from the perspective of who's to play in the leaf node.
     leaf_nodes = [path[-1] for path in paths]
@@ -204,6 +163,9 @@ def run_mcts(game: Game, net: Network, num_searches: int, temperature: float, ro
     # backpropagate through each path
     for path, value, scratch_game in zip(paths, values, scratch_games):
       for node in path:
+        # if the game is over, the value is the actual reward
+        if scratch_game.is_terminal():
+          value = scratch_game.get_winner() * scratch_game.to_play
         node.value_sum += value if node.to_play == scratch_game.to_play else -value
         node.visit_count += 1
 
@@ -212,7 +174,8 @@ def run_mcts(game: Game, net: Network, num_searches: int, temperature: float, ro
           node.value_sum += VIRTUAL_LOSS
 
   # Return the action to play and the action probabilities (normalized visit counts).
-  temperature = 1 if len(game.history) < NUM_SAMPLING_MOVES and explore else 0
+  if temperature is None:
+    temperature = 1 if len(game.history) < NUM_SAMPLING_MOVES and explore else 0
   action = select_action(root, temperature=temperature), root
   if DEBUG:
     root.visualize()
@@ -229,7 +192,7 @@ def self_play(net, game_num):
   game_buffer = []
 
   while not game.is_terminal():
-    action, root = run_mcts(root=root, game=game, net=net, num_searches=NUM_SEARCHES, temperature=1, explore=True)
+    action, root = run_mcts(root=root, game=game, net=net, num_searches=NUM_SEARCHES, explore=True)
 
     # mcts_policy = torch.zeros((3, 3))
     mcts_policy = torch.zeros((7,))
@@ -242,7 +205,7 @@ def self_play(net, game_num):
     game = game.next_state(action=action)
     if game_num % 100 == 0:
       game.print_board()
-      print(mcts_policy)
+      print(mcts_policy, root.get_value())
       print()
 
     root = root.children[action] # reuse the tree
@@ -261,20 +224,29 @@ def train(net, optim, device, buffer):
   # move the network to the GPU if available
   net = net.to(device)
 
-  batch_size = 128
-  num_batches = len(buffer) // batch_size
+  num_batches = len(buffer) // BATCH_SIZE
 
   for epoch in range(NUM_EPOCHS):
     # sample 50% of the buffer
     losssum = 0
     t0 = time.monotonic_ns()
     random.shuffle(buffer)
-    batches = [buffer[i * batch_size:(i + 1) * batch_size] for i in range(num_batches)]
+    batches = [buffer[i * BATCH_SIZE:(i + 1) * BATCH_SIZE] for i in range(num_batches)]
 
     for batch in tqdm.tqdm(batches):
       values = torch.tensor([value for _, _, value in batch], dtype=torch.float32).unsqueeze(1)
       probabilities = torch.stack([probabilities for _, probabilities, _ in batch])
       games = [game for game, _, _ in batch]
+
+      if DEBUG:
+        print("training batch")
+        print("actual values", values)
+        print("actual probs", probabilities)
+        print("games")
+        for game in games:
+          game.print_board()
+          print("  game to play", game.to_play)
+        print()
 
       # encode board and move probabilities, value
       encoded_boards = torch.stack([board2state(game) for game in games])
@@ -306,7 +278,7 @@ def _battle_game(old_net, new_net, game_num):
   # TODO: reuse the tree for each net.
   while not game.is_terminal():
     use_old_net = game.to_play == old_net_player
-    action, _ = run_mcts(game=game, net=old_net if use_old_net else new_net, num_searches=NUM_SEARCHES, temperature=0, explore=False)
+    action, _ = run_mcts(game=game, net=old_net if use_old_net else new_net, num_searches=NUM_SEARCHES, temperature=0, explore=True)
     game = game.next_state(action=action)
 
   winner = game.get_winner()
@@ -336,7 +308,7 @@ def main():
   SELF_PLAY_GAMES_FN = "self-play-games.pickle"
 
   buffer = []
-  if os.path.exists(SELF_PLAY_GAMES_FN):
+  if os.path.exists(SELF_PLAY_GAMES_FN) and not DEBUG:
     print("loading self play games...")
     with open(SELF_PLAY_GAMES_FN, "rb") as f:
       buffer = pickle.load(f)
@@ -356,15 +328,15 @@ def main():
     device = torch.device("cpu")
 
   # load model and optimizer if they exist
-  if os.path.exists(MODEL_FN) and os.path.exists(OPTIMIZER_FN):
+  if os.path.exists(MODEL_FN) and os.path.exists(OPTIMIZER_FN) and not DEBUG:
     print("loading model and optimizer...")
     net.load_state_dict(torch.load(MODEL_FN))
 
   # move the network to the GPU if available to create the optimizer there, then cpu for multiprocessing
   net.to(device)
   optim = torch.optim.Adam(net.parameters(), lr=0.001, weight_decay=1e-5)
-  if os.path.exists(MODEL_FN) and os.path.exists(OPTIMIZER_FN):
-    optim.load_state_dict(torch.load(OPTIMIZER_FN, map_location=device))
+  if os.path.exists(MODEL_FN) and os.path.exists(OPTIMIZER_FN) and not DEBUG:
+    optim.load_state_dict(torch.load(OPTIMIZER_FN))
   net = net.to(torch.device("cpu")) # back to cpu for multiprocessing
 
   for iteration in range(NUM_ITERATIONS):
@@ -386,15 +358,20 @@ def main():
       print("got ", len(results), "states in", sec, "seconds") 
 
     # save self play games
-    with open(SELF_PLAY_GAMES_FN, "wb") as f:
-      pickle.dump(buffer, f)
+    if not DEBUG:
+      with open(SELF_PLAY_GAMES_FN, "wb") as f:
+        pickle.dump(buffer, f)
 
     train(new_net, new_optim, device, buffer)
 
     # play against previous version
     old_wins, draws, new_wins = battle(old_net=net, new_net=new_net)
     print("old wins", old_wins, "draws", draws, "new wins", new_wins)
-    if new_wins / (old_wins + new_wins) >= 0.55: # new model wins more than 55% of the time
+
+    with open("results.txt", "a") as f:
+      f.write(f"ITER: {iteration} OW: {old_wins} D: {draws} NW: {new_wins}\n")
+
+    if (old_wins + new_wins) > 0 and new_wins / (old_wins + new_wins) >= 0.55: # new model wins more than 55% of the time
       print(" >>> choose NEW model !!!")
 
       # save model and optimizer
@@ -407,11 +384,12 @@ def main():
     else:
       print(" >>> choose OLD model !!!")
 
-    # Keep the last 100 000 states only.
-    buffer = buffer[-100000:]
+    # Keep the last 75 000 states only.
+    buffer = buffer[-75000:]
 
-    torch.save(new_net.state_dict(), f"connect4-model-{iteration}.pt")
-    torch.save(new_optim.state_dict(), f"connect4-optim-{iteration}.pt")
+    if not DEBUG:
+      torch.save(new_net.state_dict(), f"connect4-model-{iteration}.pt")
+      torch.save(new_optim.state_dict(), f"connect4-optim-{iteration}.pt")
 
 
 if __name__ == "__main__":

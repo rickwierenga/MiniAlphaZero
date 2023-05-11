@@ -31,8 +31,8 @@ def battle(game: Game, player: Agent, other_player: Agent):
 
     history.append((game, action, value))
 
-    game = game.next_state(action=action)
     print(f"player: {game.to_play} move: {action} value: {value} thinking time: {(time.monotonic_ns() - t0) / 1e6:.3f} ms")
+    game = game.next_state(action=action)
 
     if game.is_terminal():
       print("\n")

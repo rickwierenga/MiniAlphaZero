@@ -50,7 +50,7 @@ class Connect4(Game):
 
   def is_board_full(self):
     return not any(0 in row for row in self.board)
-  
+
   def print_board(self):
     """ Print a human-readable representation of the board """
 
@@ -69,12 +69,14 @@ class Connect4(Game):
 
   def get_legal_moves(self):
     """ Return a list of legal moves """
+    if self.is_terminal():
+      return []
     return [c for c in range(self.num_cols) if self.is_valid_move(c)]
-  
+
   def is_terminal(self):
     """ Return True if the game is over """
     return self.get_winner() != 0 or self.is_board_full()
-  
+
   def next_state(self, action):
     """ Return a new Connect4 object with the given action played """
 
@@ -86,7 +88,7 @@ class Connect4(Game):
     new_board[row][action] = self.to_play
     new_state = Connect4(board=new_board, to_play=-self.to_play, history=self.history + [action])
     return new_state
- 
+
   def hash(self) -> int:
     return hash(str(self.board) + str(self.to_play))
 
