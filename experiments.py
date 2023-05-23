@@ -80,8 +80,6 @@ def benchmark():
     mse = np.square(np.subtract(values, scores)).mean()
     print(mse)
 
-DEFAULT_ELO = 1400 
-K_FACTOR = 32 # Sensitivity good for lower rated players 
 def calc_elo(score, prev_elo_1, prev_elo_2):
     """Find new elo ratings for two players based on previous and current score
     
@@ -93,6 +91,8 @@ def calc_elo(score, prev_elo_1, prev_elo_2):
 
     TODO adjust these constants based on data and more research
     """
+    DEFAULT_ELO = 1000
+    K_FACTOR = 32 
     # Set default elo values if not given
     if prev_elo_1 is None: prev_elo_1 = DEFAULT_ELO
     if prev_elo_2 is None: prev_elo_2 = DEFAULT_ELO
@@ -113,6 +113,7 @@ def find_elo_values():
     In this case the players are different iterations of the same model.
     """
     with open("data/results.txt") as file:
+        elo_old, elo_new = None, None
         for line in file:
             # Each iteration is seen as a new player
             # TODO keep previous elo?
@@ -123,14 +124,13 @@ def find_elo_values():
             draws += int(columns[5])
             new_wins += int(columns[7])
             print(f"ELO ratings iteration {columns[1]}:")
-            print(f"- Player 'New' has won {new_wins} games")
-            print(f"- There have been {draws} draws")
-            print(f"- Player 'Old' has won {old_wins} games")
+            # print(f"- Player 'New' has won {new_wins} games")
+            # print(f"- There have been {draws} draws")
+            # print(f"- Player 'Old' has won {old_wins} games")
             # Generate scores as array of game results
             scores = [0 for _ in range(old_wins)] + [0.5 for _ in range(draws)] + [1 for _ in range(new_wins)]
             random.shuffle(scores) # TODO needed to shuffle?
             # Find elo values based on game results
-            elo_old, elo_new = None, None
             for i, score in enumerate(scores):
                 elo_old, elo_new = calc_elo(score, elo_new, elo_old)
                 # print(f"Game {i+1}: 'New' scored {score} against 'Old'")
@@ -138,7 +138,10 @@ def find_elo_values():
                 # print(f"Elo 'Old': {elo_old}") 
             print(f"Final ELO ratings:")
             print(f"Elo 'New': {elo_new}")
-            print(f"Elo 'Old': {elo_old}") 
+            print(f"Elo 'Old': {elo_old}")
+        # Reset elo for next iteration
+        elo_old = elo_new # transitive, the new player is reused in the old
+        elo_new = None
 
 if __name__ == "__main__":
     find_elo_values()
