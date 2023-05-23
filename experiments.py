@@ -19,8 +19,8 @@ def alphazero_agent(game, net, num_searches=None):
 
 def MCTSvsMiniMax(num_searches=None):
     # Load trained MCTS model
-    models = [file for file in os.listdir() if re.match(r"connect4-model-[0-9]*.pt", file)]
-    N_REPEATS = 5
+    models = [file.path for file in os.scandir('data') if re.match(r".*connect4-model-[0-9]*.pt", file.path)]
+    N_REPEATS = 25
     DEPTH = 4
     for model in models:
         net = Network(board_size=(6, 7), policy_shape=(7,), num_layers=10)
@@ -41,7 +41,7 @@ def MCTSvsMiniMax(num_searches=None):
             win, _ = battle(Connect4(), agent_minimax, agent_mcts, False)
             if win == -1:
                 n_wins_mcts += 1
-        print(f"MCTS {model} wins from MiniMax depth={DEPTH} in {100*n_wins_mcts/(N_REPEATS*2)}% of games")
+        print(f"MCTS {model} searches={num_searches} wins from MiniMax depth={DEPTH} in {100*n_wins_mcts/(N_REPEATS*2)}% of games")
     
 def benchmark():
     """Benchmark value found by alphazero by using benchmark dataset
@@ -154,4 +154,5 @@ def policyVsMiniMax():
     MCTSvsMiniMax(num_searches=0)
 
 if __name__ == "__main__":
-    find_elo_values()
+    policyVsMiniMax()
+    MCTSvsMiniMax()
