@@ -12,12 +12,12 @@ import re
 import numpy as np
 import random
 
-def alphazero_agent(game, net):
+def alphazero_agent(game, net, num_searches=None):
   root = Node(to_play=game.to_play, prior=0)
-  action, root = run_mcts(game=game, root=root, net=net, num_searches=480, temperature=0, explore=True)
+  action, root = run_mcts(game=game, root=root, net=net, num_searches=num_searches, temperature=0, explore=True)
   return action, root.get_value()
 
-def MCTSvsMiniMax():
+def MCTSvsMiniMax(num_searches=None):
     # Load trained MCTS model
     models = [file for file in os.listdir() if re.match(r"connect4-model-[0-9]*.pt", file)]
     N_REPEATS = 5
@@ -142,6 +142,16 @@ def find_elo_values():
         # Reset elo for next iteration
         elo_old = elo_new # transitive, the new player is reused in the old
         elo_new = None
+
+def performance_rating():
+    pass
+
+def find_performance_rating():
+    pass
+
+def policyVsMiniMax():
+    """Compare performance of policy network vs minimax"""
+    MCTSvsMiniMax(num_searches=0)
 
 if __name__ == "__main__":
     find_elo_values()
