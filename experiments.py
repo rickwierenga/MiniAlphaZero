@@ -14,7 +14,7 @@ import random
 
 def alphazero_agent(game, net):
   root = Node(to_play=game.to_play, prior=0)
-  action, root = run_mcts(game=game, root=root, net=net, temperature=0, explore=True)
+  action, root = run_mcts(game=game, root=root, net=net, device="cpu", temperature=0, explore=True)
   return action, root.get_value()
 
 def policy_agent(game, net):
@@ -196,8 +196,4 @@ def policyVsMiniMax():
     MCTSvsMiniMax(agent=policy_agent)
 
 if __name__ == "__main__":
-    benchmark()
-    exit()
-    policyVsMiniMax()
-    exit()
     MCTSvsMiniMax()
