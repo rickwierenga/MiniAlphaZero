@@ -29,7 +29,7 @@ def policy_agent(game, net):
 def MCTSvsMiniMax(agent=alphazero_agent):
     # Load trained MCTS model
     models = [file.path for file in os.scandir('data') if re.match(r".*connect4-model-[0-9]*.pt", file.path)]
-    N_REPEATS = 25
+    N_REPEATS = 50
     DEPTH = 4
     for model in models:
         net = Network(board_size=(6, 7), policy_shape=(7,), num_layers=10)
@@ -173,15 +173,15 @@ def test_sig_better():
             # print(f"- Player 'New' has won {new_wins} games")
             # print(f"- There have been {draws} draws")
             # print(f"- Player 'Old' has won {old_wins} games")
-            # Find average win rate from perspective of new player
-            n = old_wins + draws + new_wins
-            win_rate = new_wins / n # Proportion of games won by new player
-            std = np.sqrt(win_rate * (1 - win_rate) / n) # Standard error
-            print(f"Win rate: {win_rate} ({std})")
             # Test if new player is significantly better than old player
             # Find 95% confidence interval
             z = 1.645 # 95% confidence interval, one-sided
             h0 = 0.5 # Null hypothesis: new player is not better than old player
+            # Find average win rate from perspective of new player
+            n = old_wins + draws + new_wins
+            win_rate = new_wins / n # Proportion of games won by new player
+            std = np.sqrt(h0 * (1 - h0) / n) # Standard error
+            print(f"Win rate: {win_rate} ({std})")
             upper = h0 + z * std
             if win_rate > upper:
                 print(f"{win_rate} is higher than {upper}")
@@ -195,5 +195,7 @@ def policyVsMiniMax():
     MCTSvsMiniMax(agent=policy_agent)
 
 if __name__ == "__main__":
+    test_sig_better()
+    exit()
     policyVsMiniMax()
     MCTSvsMiniMax()
