@@ -22,9 +22,10 @@ def policy_agent(game, net):
   with torch.no_grad():
     policies, values = net(encoded_boards)
   actions_probs = torch.zeros(7)
-  for i, action in enumerate(game.get_legal_moves()):
-    actions_probs[action] = policies[0, i]
-  return torch.argmax(actions_probs), None
+  for action in game.get_legal_moves():
+    actions_probs[action] = policies[0, action]
+  action = torch.argmax(actions_probs)
+  return action, values[action]
 
 def MCTSvsMiniMax(agent=alphazero_agent):
     # Load trained MCTS model
