@@ -1,5 +1,3 @@
-# basic MCTS implementation
-
 import copy
 import multiprocessing
 import os
@@ -11,15 +9,14 @@ from typing import List
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torch.nn as nn
 import tqdm
 
 from connect4 import Connect4
 from game import Game
 from resnet import Network
 
-NUM_SEARCHES = 480
-NUM_GAMES_SELF_PLAY = 2000 # this will be removed once the self play is always running
+NUM_SEARCHES = 576
+NUM_GAMES_SELF_PLAY = 3000 # this will be removed once the self play is always running
 NUM_ITERATIONS = 1000 # number of iterations of self play, training, and evaluation
 NUM_SELF_PLAYERS = 8
 NUM_EPOCHS = 20
@@ -93,9 +90,9 @@ def uct_score(node: Node, parent: Node):
   prior_score = C * node.prior * np.sqrt(parent.visit_count) / (1 + node.visit_count) # U
   return -node.get_value() + prior_score # flip value because we're looking from the other player's perspective
 
-def expand(leaf_nodes: List[Node], games: List[Game], net: Network):
+def expand(leaf_nodes: List[Node], games: List[Game], net: Network, device):
   # obtain the policy and value from the network
-  encoded_boards = torch.stack([board2state(game) for game in games])
+  encoded_boards = torch.stack([board2state(game) for game in games]) #.to(device)
   with torch.no_grad():
     policies, values = net(encoded_boards)
 
@@ -120,11 +117,11 @@ def select_action(node: Node, temperature: float):
   action = list(node.children.keys())[action_index]
   return action
 
-def run_mcts(game: Game, net: Network, num_searches: int, temperature=None, root=None, explore: bool = True):
+def run_mcts(game: Game, net: Network, num_searches: int, device, temperature=None, root=None, explore: bool = True):
   # start by expanding the root node
   if root is None:
     root = Node(to_play=game.to_play, prior=0)
-    expand(leaf_nodes=[root], net=net, games=[game])
+    expand(leaf_nodes=[root], net=net, games=[game], device=device)
 
   # add Dirichlet noise to the root node
   epsilon = 0.25
@@ -158,7 +155,7 @@ def run_mcts(game: Game, net: Network, num_searches: int, temperature=None, root
     # Compute the value and policy for each leaf node in a batch.
     # These are the values from the perspective of who's to play in the leaf node.
     leaf_nodes = [path[-1] for path in paths]
-    values = expand(games=scratch_games, leaf_nodes=leaf_nodes, net=net)
+    values = expand(games=scratch_games, leaf_nodes=leaf_nodes, net=net, device=device)
 
     # backpropagate through each path
     for path, value, scratch_game in zip(paths, values, scratch_games):
@@ -183,7 +180,8 @@ def run_mcts(game: Game, net: Network, num_searches: int, temperature=None, root
   return action
 
 
-def self_play(net, game_num):
+def self_play(net, game_num, device):
+  print("start self play")
   self_play_buffer = []
 
   t = time.monotonic_ns()
@@ -192,7 +190,7 @@ def self_play(net, game_num):
   game_buffer = []
 
   while not game.is_terminal():
-    action, root = run_mcts(root=root, game=game, net=net, num_searches=NUM_SEARCHES, explore=True)
+    action, root = run_mcts(root=root, game=game, net=net, num_searches=NUM_SEARCHES, explore=True, device=device)
 
     # mcts_policy = torch.zeros((3, 3))
     mcts_policy = torch.zeros((7,))
@@ -227,7 +225,6 @@ def train(net, optim, device, buffer):
   num_batches = len(buffer) // BATCH_SIZE
 
   for epoch in range(NUM_EPOCHS):
-    # sample 50% of the buffer
     losssum = 0
     t0 = time.monotonic_ns()
     random.shuffle(buffer)
@@ -270,7 +267,7 @@ def train(net, optim, device, buffer):
   # move the network back to the CPU for inference, TODO: check if this is necessary
   net = net.to(torch.device("cpu"))
 
-def _battle_game(old_net, new_net, game_num):
+def _battle_game(old_net, new_net, game_num, device):
   t0 = time.monotonic_ns()
   game = Connect4()
   old_net_player = 1 if game_num % 2 == 1 else -1
@@ -278,7 +275,7 @@ def _battle_game(old_net, new_net, game_num):
   # TODO: reuse the tree for each net.
   while not game.is_terminal():
     use_old_net = game.to_play == old_net_player
-    action, _ = run_mcts(game=game, net=old_net if use_old_net else new_net, num_searches=NUM_SEARCHES, temperature=0, explore=True)
+    action, _ = run_mcts(game=game, net=old_net if use_old_net else new_net, num_searches=NUM_SEARCHES, temperature=0, explore=True, device=device)
     game = game.next_state(action=action)
 
   winner = game.get_winner()
@@ -289,13 +286,13 @@ def _battle_game(old_net, new_net, game_num):
     -old_net_player: 1
   }[winner]
 
-def battle(old_net, new_net):
+def battle(old_net, new_net, device):
   old_wins = 0
   draws = 0
 
   new_wins = 0
   with multiprocessing.Pool(NUM_SELF_PLAYERS) as pool:
-    results = pool.starmap(_battle_game, [(old_net, new_net, game_num) for game_num in range(NUM_EVALUATION_GAMES)])
+    results = pool.starmap(_battle_game, [(old_net, new_net, game_num, device) for game_num in range(NUM_EVALUATION_GAMES)])
     for result in results:
       if result == -1: old_wins += 1
       elif result == 0: draws += 1
@@ -304,7 +301,17 @@ def battle(old_net, new_net):
   return old_wins, draws, new_wins
 
 
+def self_player(net, device):
+  results = []
+  # net.to(device)
+  for game_num in range(NUM_GAMES_SELF_PLAY // NUM_SELF_PLAYERS):
+    plays = self_play(net=net, game_num=game_num, device=device)
+    results.extend(plays)
+  return results
+
+
 def main():
+  print("main")
   SELF_PLAY_GAMES_FN = "self-play-games.pickle"
 
   buffer = []
@@ -339,7 +346,7 @@ def main():
     optim.load_state_dict(torch.load(OPTIMIZER_FN))
   net = net.to(torch.device("cpu")) # back to cpu for multiprocessing
 
-  for iteration in range(NUM_ITERATIONS):
+  for iteration in range(6, NUM_ITERATIONS):
     # copy the network
     # new_net = Network()
     new_net = Network(board_size=(6, 7), policy_shape=(7,), num_layers=10)
@@ -351,7 +358,7 @@ def main():
     print("iteration", iteration)
     with multiprocessing.Pool(NUM_SELF_PLAYERS) as pool:
       t0 = time.monotonic_ns()
-      results = pool.starmap(self_play, [(net, game_num) for game_num in range(NUM_GAMES_SELF_PLAY)])
+      results = pool.starmap(self_player, [(net, device) for _ in range(NUM_SELF_PLAYERS)])
       results = [item for sublist in results for item in sublist] # flatten
       buffer.extend(results)
       sec = (time.monotonic_ns() - t0) / 1e9
@@ -364,8 +371,12 @@ def main():
 
     train(new_net, new_optim, device, buffer)
 
+    if not DEBUG:
+      torch.save(new_net.state_dict(), f"connect4-model-{iteration}.pt")
+      torch.save(new_optim.state_dict(), f"connect4-optim-{iteration}.pt")
+
     # play against previous version
-    old_wins, draws, new_wins = battle(old_net=net, new_net=new_net)
+    old_wins, draws, new_wins = battle(old_net=net, new_net=new_net, device=device)
     print("old wins", old_wins, "draws", draws, "new wins", new_wins)
 
     with open("results.txt", "a") as f:
@@ -384,12 +395,8 @@ def main():
     else:
       print(" >>> choose OLD model !!!")
 
-    # Keep the last 75 000 states only.
-    buffer = buffer[-75000:]
-
-    if not DEBUG:
-      torch.save(new_net.state_dict(), f"connect4-model-{iteration}.pt")
-      torch.save(new_optim.state_dict(), f"connect4-optim-{iteration}.pt")
+    # Keep the last 150 000 states only.
+    buffer = buffer[-150000:]
 
 
 if __name__ == "__main__":
