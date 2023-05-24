@@ -149,6 +149,37 @@ def performance_rating():
 def find_performance_rating():
     pass
 
+def test_sig_better():
+    """Test if one model is significantly better than another"""
+    with open("data/results.txt") as file:
+        for line in file:
+            # Parse results from file TODO which format?
+            columns = line.split(" ")
+            old_wins, draws, new_wins = 0, 0, 0
+            old_wins += int(columns[3])
+            draws += int(columns[5])
+            new_wins += int(columns[7])
+            print(f"Results iteration {columns[1]}:")
+            # print(f"- Player 'New' has won {new_wins} games")
+            # print(f"- There have been {draws} draws")
+            # print(f"- Player 'Old' has won {old_wins} games")
+            # Find average win rate from perspective of new player
+            n = old_wins + draws + new_wins
+            win_rate = new_wins / n # Proportion of games won by new player
+            std = np.sqrt(win_rate * (1 - win_rate) / n) # Standard error
+            print(f"Win rate: {win_rate} ({std})")
+            # Test if new player is significantly better than old player
+            # Find 95% confidence interval
+            z = 1.645 # 95% confidence interval, one-sided
+            h0 = 0.5 # Null hypothesis: new player is not better than old player
+            upper = h0 + z * std
+            if win_rate > upper:
+                print(f"{win_rate} is higher than {upper}")
+                print("New player is significantly better than old player")
+            else:
+                print(f"{win_rate} is lower than {upper}")
+                print("New player is not significantly better than old player")
+
 def policyVsMiniMax():
     """Compare performance of policy network vs minimax"""
     MCTSvsMiniMax(num_searches=0)
