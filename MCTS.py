@@ -117,8 +117,10 @@ def select_action(node: Node, temperature: float):
   action = list(node.children.keys())[action_index]
   return action
 
-def run_mcts(game: Game, net: Network, num_searches: int, device, temperature=None, root=None, explore: bool = True):
+def run_mcts(game: Game, net: Network, device, num_searches: int = None, temperature=None, root=None, explore: bool = True):
   # start by expanding the root node
+  if num_searches is None: # Init
+    num_searches = NUM_SEARCHES 
   if root is None:
     root = Node(to_play=game.to_play, prior=0)
     expand(leaf_nodes=[root], net=net, games=[game], device=device)

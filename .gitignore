@@ -4,3 +4,4 @@ env/
 *.swp
 *.DS_Store
 *.pt
+data/

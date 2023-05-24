@@ -2,11 +2,11 @@ import numpy  as np
 from game import Game
 from util import battle
 
+# Store global state in a cache
+cache = {}
 
-def minimax(game: Game, cache = None, depth=0, max_depth=None):
+def minimax(game: Game, depth=0, max_depth=None):
   """ Perform minimax search to find the optimal move. """
-  if cache is None: cache = {}
-
   # Check if we've already seen this state
   if game.hash() in cache:
     best_moves, value = cache[game.hash()]
@@ -31,7 +31,7 @@ def minimax(game: Game, cache = None, depth=0, max_depth=None):
   best_moves = []
   for move in game.get_legal_moves():
     next_game = game.next_state(move)
-    _, value = minimax(next_game, cache, depth=depth+1, max_depth=max_depth)
+    _, value = minimax(next_game, depth=depth+1, max_depth=max_depth)
     value = -value # flip because we're looking from the other player's perspective
     if value >= best_value:
       best_value = value
