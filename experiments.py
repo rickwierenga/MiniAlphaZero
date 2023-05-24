@@ -12,12 +12,21 @@ import re
 import numpy as np
 import random
 
-def alphazero_agent(game, net, num_searches=None):
+def alphazero_agent(game, net):
   root = Node(to_play=game.to_play, prior=0)
-  action, root = run_mcts(game=game, root=root, net=net, num_searches=num_searches, temperature=0, explore=True)
+  action, root = run_mcts(game=game, root=root, net=net, temperature=0, explore=True)
   return action, root.get_value()
 
-def MCTSvsMiniMax(num_searches=None):
+def policy_agent(game, net):
+  encoded_boards = board2state(game)
+  with torch.no_grad():
+    policies, values = net(encoded_boards)
+  actions_probs = torch.zeros(7)
+  for i, action in enumerate(game.get_legal_moves()):
+    actions_probs[action] = policies[0, i]
+  return torch.argmax(actions_probs), None
+
+def MCTSvsMiniMax(agent=alphazero_agent):
     # Load trained MCTS model
     models = [file.path for file in os.scandir('data') if re.match(r".*connect4-model-[0-9]*.pt", file.path)]
     N_REPEATS = 25
@@ -26,7 +35,7 @@ def MCTSvsMiniMax(num_searches=None):
         net = Network(board_size=(6, 7), policy_shape=(7,), num_layers=10)
         net.load_state_dict(torch.load(model))
         # Agent that can be called with game and net and returns action and value
-        agent_mcts = lambda game: alphazero_agent(game, net)
+        agent_mcts = lambda game: agent(game, net)
         # Agent that can be called with game and returns action and value
         agent_minimax = lambda game: minimax(game, max_depth=DEPTH)
         # Play against minimax
@@ -41,7 +50,7 @@ def MCTSvsMiniMax(num_searches=None):
             win, _ = battle(Connect4(), agent_minimax, agent_mcts, False)
             if win == -1:
                 n_wins_mcts += 1
-        print(f"MCTS {model} searches={num_searches} wins from MiniMax depth={DEPTH} in {100*n_wins_mcts/(N_REPEATS*2)}% of games")
+        print(f"{agent.__name__} {model} wins from MiniMax depth={DEPTH} in {100*n_wins_mcts/(N_REPEATS*2)}% of games")
     
 def benchmark():
     """Benchmark value found by alphazero by using benchmark dataset
@@ -112,6 +121,7 @@ def find_elo_values():
     
     In this case the players are different iterations of the same model.
     """
+    raise DeprecationWarning("Not used as we are not sure this is valid")
     with open("data/results.txt") as file:
         elo_old, elo_new = None, None
         for line in file:
@@ -144,10 +154,10 @@ def find_elo_values():
         elo_new = None
 
 def performance_rating():
-    pass
+    raise NotImplementedError("May not be useful")
 
 def find_performance_rating():
-    pass
+    raise NotImplementedError("May not be useful")
 
 def test_sig_better():
     """Test if one model is significantly better than another"""
@@ -182,7 +192,7 @@ def test_sig_better():
 
 def policyVsMiniMax():
     """Compare performance of policy network vs minimax"""
-    MCTSvsMiniMax(num_searches=0)
+    MCTSvsMiniMax(agent=policy_agent)
 
 if __name__ == "__main__":
     policyVsMiniMax()
