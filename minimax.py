@@ -5,13 +5,14 @@ from util import battle
 # Store global state in a cache
 cache = {}
 
-def minimax(game: Game, depth=0, max_depth=None):
+def minimax(game: Game, depth=0, max_depth=None, random=False):
   """ Perform minimax search to find the optimal move. """
   # Check if we've already seen this state
   if game.hash() in cache:
     best_moves, value = cache[game.hash()]
     # Randomly choose between moves of equal value
-    best_move = np.random.choice(best_moves)
+    if random: best_move = np.random.choice(best_moves)
+    else: best_move = best_moves[0]
     return best_move, value
 
   if game.is_terminal():
@@ -31,7 +32,7 @@ def minimax(game: Game, depth=0, max_depth=None):
   best_moves = []
   for move in game.get_legal_moves():
     next_game = game.next_state(move)
-    _, value = minimax(next_game, depth=depth+1, max_depth=max_depth)
+    _, value = minimax(next_game, depth=depth+1, max_depth=max_depth, random=random)
     value = -value # flip because we're looking from the other player's perspective
     if value >= best_value:
       best_value = value
@@ -41,7 +42,8 @@ def minimax(game: Game, depth=0, max_depth=None):
 
   cache[game.hash()] = best_moves, best_value
   # Randomly choose between moves of equal value
-  best_move = np.random.choice(best_moves)
+  if random: best_move = np.random.choice(best_moves)
+  else: best_move = best_moves[0]
   return best_move, best_value
 
 
