@@ -5,7 +5,7 @@ from util import battle
 # Store global state in a cache
 cache = {}
 
-def minimax(game: Game, depth=0, max_depth=None, random=False):
+def minimax(game: Game, depth=0, max_depth=None, random=True):
   """ Perform minimax search to find the optimal move. """
   # Check if we've already seen this state
   if game.hash() in cache:
