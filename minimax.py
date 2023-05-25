@@ -34,8 +34,10 @@ def minimax(game: Game, depth=0, max_depth=None, random=False):
     next_game = game.next_state(move)
     _, value = minimax(next_game, depth=depth+1, max_depth=max_depth, random=random)
     value = -value # flip because we're looking from the other player's perspective
-    if value >= best_value:
+    if value > best_value:
       best_value = value
+      best_moves = [move]
+    elif value == best_value:
       best_moves.append(move)
   if len(best_moves) == 0:
     best_moves.append(None) # TODO needed?
