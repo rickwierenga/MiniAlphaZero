@@ -25,7 +25,7 @@ def policy_agent(game, net):
   for action in game.get_legal_moves():
     actions_probs[action] = policies[0, action]
   action = torch.argmax(actions_probs)
-  return action, values[action]
+  return action, None
 
 def MCTSvsMiniMax(agent=alphazero_agent):
     # Load trained MCTS model
@@ -197,4 +197,4 @@ def policyVsMiniMax():
     MCTSvsMiniMax(agent=policy_agent)
 
 if __name__ == "__main__":
-    MCTSvsMiniMax()
+    policyVsMiniMax()
