@@ -29,7 +29,7 @@ def policy_agent(game, net):
 
 def MCTSvsMiniMax(agent=alphazero_agent):
     # Load trained MCTS model
-    models = [file.path for file in os.scandir('data') if re.match(r".*connect4-model-[0-9]*.pt", file.path)]
+    models = [file.path for file in os.scandir('.') if re.match(r".*connect4-model-[0-9]*.pt", file.path)]
     N_REPEATS = 50
     DEPTH = 4
     for model in models:
@@ -60,12 +60,13 @@ def benchmark():
     """
     
     # Load trained MCTS model
-    models = [file.path for file in os.scandir('data') if re.match(r".*connect4-model-[0-9]*.pt", file.path)]
+    models = [file.path for file in os.scandir('.') if re.match(r".*connect4-model-[0-9]*.pt", file.path)]
+    models = [None] * 10 + models
     for model in models:
         net = Network(board_size=(6, 7), policy_shape=(7,), num_layers=10)
-        net.load_state_dict(torch.load(model))
+        if model is not None: net.load_state_dict(torch.load(model))
         # Read benchmark dataset
-        tests = [file.path for file in os.scandir('data') if re.match(r".*Test_L[0-9]_R[0-9]", file.path)]
+        tests = [file.path for file in os.scandir('.') if re.match(r".*Test_L[0-9]_R[0-9]", file.path)]
         scores = []
         states = []
         for test in tests:
@@ -155,15 +156,9 @@ def find_elo_values():
         elo_old = elo_new # transitive, the new player is reused in the old
         elo_new = None
 
-def performance_rating():
-    raise NotImplementedError("May not be useful")
-
-def find_performance_rating():
-    raise NotImplementedError("May not be useful")
-
 def test_sig_better():
     """Test if one model is significantly better than another"""
-    with open("data/results.txt") as file:
+    with open("./Test_results.txt") as file:
         for line in file:
             # Parse results from file TODO which format?
             columns = line.split(" ")
@@ -197,4 +192,11 @@ def policyVsMiniMax():
     MCTSvsMiniMax(agent=policy_agent)
 
 if __name__ == "__main__":
+    print("Test 1: significance")
+    test_sig_better()
+    print("Test 2: value network evaluation")
+    benchmark()
+    print("Test 3: policy vs minimax")
     policyVsMiniMax()
+    print("Test 4: MiniAlphaZero vs minimax")
+    MCTSvsMiniMax()
