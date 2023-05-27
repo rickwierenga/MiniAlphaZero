@@ -117,7 +117,7 @@ def select_action(node: Node, temperature: float):
   action = list(node.children.keys())[action_index]
   return action
 
-def run_mcts(game: Game, net: Network, device, num_searches: int = None, temperature=None, root=None, explore: bool = True):
+def run_mcts(game: Game, net: Network, device = torch.device("cpu"), num_searches: int = None, temperature=None, root=None, explore: bool = True):
   # start by expanding the root node
   if num_searches is None: # Init
     num_searches = NUM_SEARCHES 
@@ -175,11 +175,11 @@ def run_mcts(game: Game, net: Network, device, num_searches: int = None, tempera
   # Return the action to play and the action probabilities (normalized visit counts).
   if temperature is None:
     temperature = 1 if len(game.history) < NUM_SAMPLING_MOVES and explore else 0
-  action = select_action(root, temperature=temperature), root
+  action = select_action(root, temperature=temperature)
   if DEBUG:
     root.visualize()
     print("choosing", action)
-  return action
+  return action, root
 
 
 def self_play(net, game_num, device):
