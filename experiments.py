@@ -36,9 +36,9 @@ def MCTSvsMiniMax(agent=alphazero_agent):
         net = Network(board_size=(6, 7), policy_shape=(7,), num_layers=10)
         net.load_state_dict(torch.load(model))
         # Agent that can be called with game and net and returns action and value
-        agent_mcts = lambda game: agent(game, net)
+        def agent_mcts(game): return agent(game, net)
         # Agent that can be called with game and returns action and value
-        agent_minimax = lambda game: minimax(game, max_depth=DEPTH)
+        def agent_minimax(game): return minimax(game, max_depth=DEPTH)
         # Play against minimax
         # Repeat some number of times to estimate performance
         n_wins_mcts = 0
