@@ -51,7 +51,7 @@ def MCTSvsMiniMax(agent=alphazero_agent):
             win, _ = battle(Connect4(), agent_minimax, agent_mcts, False)
             if win == -1:
                 n_wins_mcts += 1
-        print(f"{agent.__name__} {model} wins from MiniMax depth={DEPTH} in {100*n_wins_mcts/(N_REPEATS*2)}% of games")
+        print(f"{agent.__name__} {model} wins from MiniMax depth={DEPTH} in {100*n_wins_mcts/(N_REPEATS*2)}% of games, draws: {draws}")
     
 def benchmark():
     """Benchmark value found by alphazero by using benchmark dataset
